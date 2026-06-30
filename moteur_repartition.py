@@ -168,7 +168,7 @@ def generer_planning(annee, mois, liste_absences, preferences_dict=None):
                 "Jour": jour.strftime('%A'),
                 "Demi-journée": demi_journee,
                 "Astreinte 📞": medecin_garde,
-                "🟡 Secteur Jaune (+ Interne)"; sec_jaune,
+                "🟡 Secteur Jaune (+ Interne)": sec_jaune,
                 "🔵 Secteur Bleu (+ Interne)": sec_bleu,
                 "⚫ Secteur Gris (+ Interne)": sec_gris
             })
