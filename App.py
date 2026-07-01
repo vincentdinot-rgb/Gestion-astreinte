@@ -4,7 +4,7 @@ import datetime
 from moteur_repartition import generer_planning, MEDECINS
 
 st.set_page_config(page_title="Gestionnaire d'Astreintes - OHS", layout="wide")
-st.title("🏥 Pilotage du Centre de Réeducation Florentin : Astreintes & Secteurs")
+st.title("🏥 Pilotage du Centre Florentin : Astreintes & Secteurs")
 
 # Initialisation des variables de session
 if 'absences' not in st.session_state: 
