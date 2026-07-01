@@ -125,4 +125,50 @@ with col1:
                     historique_dict,
                     st.session_state['feries']
                 )
-                st
+                st.session_state['df_secteurs'] = df_sec
+                st.session_state['df_compteurs'] = df_comp
+                st.success("Planning généré et équilibré !")
+            except ValueError as e:
+                # Intercepte l'erreur du solveur pour l'afficher proprement en rouge
+                st.error(str(e))
+
+    if not st.session_state['df_compteurs'].empty:
+        st.subheader("📊 Compteurs Cumulés")
+        st.dataframe(st.session_state['df_compteurs'], hide_index=True, use_container_width=True)
+
+with col2:
+    st.header("2. Affectation Secteurs & Astreintes")
+    
+    if not st.session_state['df_secteurs'].empty:
+        df_visuel = st.session_state['df_secteurs'].copy()
+        
+        # Filtre par médecin
+        filtre_medecin = st.selectbox("Voir le planning de :", ["Vue globale"] + MEDECINS)
+        if filtre_medecin != "Vue globale":
+            masque = df_visuel.apply(lambda row: row.astype(str).str.contains(filtre_medecin).any(), axis=1)
+            df_visuel = df_visuel[masque]
+
+        # Application du code couleur
+        def appliquer_couleurs(row):
+            styles = [''] * len(row)
+            for i, col in enumerate(row.index):
+                val = str(row[col])
+                if "Astreinte" in col and val not in ["Aucun", "VIDE"]:
+                    styles[i] = 'background-color: #ffe6e6; color: #cc0000; font-weight: bold;'
+                elif "Jaune" in col and val not in ["VIDE", "Repos / Fermé"]:
+                    styles[i] = 'background-color: #fff9db; color: #8a7a00;' 
+                elif "Bleu" in col and val not in ["VIDE", "Repos / Fermé"]:
+                    styles[i] = 'background-color: #e7f5ff; color: #00509e;' 
+                elif "Gris" in col and val not in ["VIDE", "Repos / Fermé"]:
+                    styles[i] = 'background-color: #f1f3f5; color: #343a40;' 
+                elif "Repos" in val or "Férié" in val or val in ["Aucun", "VIDE"]:
+                    styles[i] = 'color: #ced4da; font-style: italic;'
+            return styles
+
+        st.dataframe(df_visuel.style.apply(appliquer_couleurs, axis=1), hide_index=True, height=650, use_container_width=True)
+        
+        # Bouton de téléchargement
+        csv = st.session_state['df_secteurs'].to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Télécharger le planning (Excel/CSV)", data=csv, file_name="Planning_Secteurs_OHS.csv", mime="text/csv")
+    else:
+        st.info("👈 Configurez vos paramètres à gauche et cliquez sur 'Générer le planning'.")
