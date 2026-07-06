@@ -7,16 +7,12 @@ st.set_page_config(page_title="Gestionnaire d'Astreintes - OHS", layout="wide")
 st.title("🏥 Pilotage du Centre Florentin : Astreintes & Secteurs")
 
 # Initialisation des variables de session
-if 'absences' not in st.session_state: 
-    st.session_state['absences'] = []
-if 'preferences' not in st.session_state: 
-    st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': []}
-if 'feries' not in st.session_state: 
-    st.session_state['feries'] = []
-if 'df_secteurs' not in st.session_state: 
-    st.session_state['df_secteurs'] = pd.DataFrame()
-if 'df_compteurs' not in st.session_state: 
-    st.session_state['df_compteurs'] = pd.DataFrame()
+if 'absences' not in st.session_state: st.session_state['absences'] = []
+if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': []}
+if 'feries' not in st.session_state: st.session_state['feries'] = []
+if 'df_secteurs' not in st.session_state: st.session_state['df_secteurs'] = pd.DataFrame()
+if 'df_compteurs' not in st.session_state: st.session_state['df_compteurs'] = pd.DataFrame()
+if 'planning_importe' not in st.session_state: st.session_state['planning_importe'] = {} # NOUVEAU
 
 JOURS_MAP = {"Lundi": 0, "Mardi": 1, "Mercredi": 2, "Jeudi": 3}
 
@@ -58,8 +54,6 @@ date_ferie = st.sidebar.date_input("Date du férié", datetime.date.today(), key
 nom_ferie = st.sidebar.text_input("Nom (ex: Ascension)", "Férié", key="fer_nom")
 
 if st.sidebar.button("Ajouter ce jour férié"):
-    if date_ferie.weekday() >= 4:
-        st.sidebar.warning("Note : Ce jour tombe un vendredi ou un week-end. L'algorithme l'intégrera directement au Bloc Week-end de ce médecin.")
     st.session_state['feries'].append({"date": date_ferie, "nom": nom_ferie})
     st.sidebar.success(f"{nom_ferie} ajouté")
 
@@ -77,7 +71,6 @@ if 'df_historique' not in st.session_state:
         "Fériés": [0, 0, 0, 0, 0]
     })
 
-# Tableau éditable pour modifier l'historique à la volée
 df_hist_edit = st.sidebar.data_editor(st.session_state['df_historique'], hide_index=True)
 st.session_state['df_historique'] = df_hist_edit
 
@@ -89,10 +82,42 @@ for _, row in df_hist_edit.iterrows():
         'ferie': int(row['Fériés'])
     }
 
+st.sidebar.markdown("---")
+
+# --- 5. Importation CSV ---
+st.sidebar.subheader("5. Verrouiller un planning existant")
+st.sidebar.caption("Uploadez le fichier CSV précédemment généré par ce logiciel pour compléter la suite.")
+fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
+
+if fichier_import is not None:
+    try:
+        df_import = pd.read_csv(fichier_import)
+        if 'Date' in df_import.columns and 'Astreinte 📞' in df_import.columns:
+            nb_jours_verrouilles = 0
+            for index, row in df_import.iterrows():
+                date_str = row['Date']
+                astr_val = str(row['Astreinte 📞'])
+                try:
+                    date_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y').date()
+                    # Détection du médecin assigné dans le texte (ex: "VD (Début WE)")
+                    for m in MEDECINS:
+                        if m in astr_val:
+                            st.session_state['planning_importe'][date_obj] = m
+                            nb_jours_verrouilles += 1
+                            break
+                except ValueError:
+                    pass
+            st.sidebar.success(f"✅ Fichier lu : astreintes verrouillées.")
+        else:
+            st.sidebar.error("Format non reconnu. Utilisez le CSV exporté par le logiciel.")
+    except Exception as e:
+        st.sidebar.error("Erreur de lecture du fichier.")
+
 if st.sidebar.button("🗑️ Tout réinitialiser"):
     st.session_state['absences'] = []
     st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': []}
     st.session_state['feries'] = []
+    st.session_state['planning_importe'] = {}
     st.rerun()
 
 
@@ -112,7 +137,6 @@ with col1:
     
     st.markdown("---")
     
-    # Bouton de génération avec protection anti-boucle (try / except)
     if st.button("🚀 Générer le planning", type="primary", use_container_width=True):
         with st.spinner("Calcul des équilibres en cours (Temps d'attente max : ~30 secondes)..."):
             try:
@@ -123,13 +147,13 @@ with col1:
                     st.session_state['absences'], 
                     st.session_state['preferences'], 
                     historique_dict,
-                    st.session_state['feries']
+                    st.session_state['feries'],
+                    st.session_state['planning_importe'] # NOUVEL ARGUMENT
                 )
                 st.session_state['df_secteurs'] = df_sec
                 st.session_state['df_compteurs'] = df_comp
                 st.success("Planning généré et équilibré !")
             except ValueError as e:
-                # Intercepte l'erreur du solveur pour l'afficher proprement en rouge
                 st.error(str(e))
 
     if not st.session_state['df_compteurs'].empty:
@@ -142,13 +166,11 @@ with col2:
     if not st.session_state['df_secteurs'].empty:
         df_visuel = st.session_state['df_secteurs'].copy()
         
-        # Filtre par médecin
         filtre_medecin = st.selectbox("Voir le planning de :", ["Vue globale"] + MEDECINS)
         if filtre_medecin != "Vue globale":
             masque = df_visuel.apply(lambda row: row.astype(str).str.contains(filtre_medecin).any(), axis=1)
             df_visuel = df_visuel[masque]
 
-        # Application du code couleur
         def appliquer_couleurs(row):
             styles = [''] * len(row)
             for i, col in enumerate(row.index):
@@ -167,7 +189,6 @@ with col2:
 
         st.dataframe(df_visuel.style.apply(appliquer_couleurs, axis=1), hide_index=True, height=650, use_container_width=True)
         
-        # Bouton de téléchargement
         csv = st.session_state['df_secteurs'].to_csv(index=False).encode('utf-8')
         st.download_button("📥 Télécharger le planning (Excel/CSV)", data=csv, file_name="Planning_Secteurs_OHS.csv", mime="text/csv")
     else:
