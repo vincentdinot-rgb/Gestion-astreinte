@@ -12,7 +12,7 @@ if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA
 if 'feries' not in st.session_state: st.session_state['feries'] = []
 if 'df_secteurs' not in st.session_state: st.session_state['df_secteurs'] = pd.DataFrame()
 if 'df_compteurs' not in st.session_state: st.session_state['df_compteurs'] = pd.DataFrame()
-if 'planning_importe' not in st.session_state: st.session_state['planning_importe'] = {} # NOUVEAU
+if 'planning_importe' not in st.session_state: st.session_state['planning_importe'] = {} 
 
 JOURS_MAP = {"Lundi": 0, "Mardi": 1, "Mercredi": 2, "Jeudi": 3}
 
@@ -86,7 +86,7 @@ st.sidebar.markdown("---")
 
 # --- 5. Importation CSV ---
 st.sidebar.subheader("5. Verrouiller un planning existant")
-st.sidebar.caption("Uploadez le fichier CSV précédemment généré par ce logiciel pour compléter la suite.")
+st.sidebar.caption("Uploadez un fichier CSV pour importer les gardes et les jours fériés.")
 fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
 
 if fichier_import is not None:
@@ -94,22 +94,43 @@ if fichier_import is not None:
         df_import = pd.read_csv(fichier_import)
         if 'Date' in df_import.columns and 'Astreinte 📞' in df_import.columns:
             nb_jours_verrouilles = 0
+            nb_feries_importes = 0
+            
             for index, row in df_import.iterrows():
-                date_str = row['Date']
+                date_str = str(row['Date'])
                 astr_val = str(row['Astreinte 📞'])
+                
                 try:
                     date_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y').date()
-                    # Détection du médecin assigné dans le texte (ex: "VD (Début WE)")
+                    
+                    # 1. Lecture et verrouillage des astreintes
                     for m in MEDECINS:
                         if m in astr_val:
                             st.session_state['planning_importe'][date_obj] = m
                             nb_jours_verrouilles += 1
                             break
+                            
+                    # 2. Lecture automatique des jours fériés
+                    nom_ferie = None
+                    # Méthode A : S'il y a une colonne "Férié" créée manuellement
+                    if 'Férié' in df_import.columns and pd.notna(row['Férié']) and str(row['Férié']).strip() != "":
+                        nom_ferie = str(row['Férié']).strip()
+                    # Méthode B : Si le nom du férié est déjà dans le texte de l'astreinte (export du logiciel)
+                    elif "Férié :" in astr_val:
+                        nom_ferie = astr_val.split("Férié :")[1].replace(")", "").strip()
+                        
+                    # Si un férié est détecté, on l'ajoute au module s'il n'y est pas déjà
+                    if nom_ferie:
+                        if not any(f['date'] == date_obj for f in st.session_state['feries']):
+                            st.session_state['feries'].append({"date": date_obj, "nom": nom_ferie})
+                            nb_feries_importes += 1
+                            
                 except ValueError:
-                    pass
-            st.sidebar.success(f"✅ Fichier lu : astreintes verrouillées.")
+                    pass # Ignore les lignes vides ou avec un format de date invalide
+                    
+            st.sidebar.success(f"✅ Fichier lu : {nb_jours_verrouilles} gardes et {nb_feries_importes} jours fériés importés.")
         else:
-            st.sidebar.error("Format non reconnu. Utilisez le CSV exporté par le logiciel.")
+            st.sidebar.error("Format non reconnu. Les colonnes 'Date' et 'Astreinte 📞' sont obligatoires.")
     except Exception as e:
         st.sidebar.error("Erreur de lecture du fichier.")
 
@@ -148,7 +169,7 @@ with col1:
                     st.session_state['preferences'], 
                     historique_dict,
                     st.session_state['feries'],
-                    st.session_state['planning_importe'] # NOUVEL ARGUMENT
+                    st.session_state['planning_importe']
                 )
                 st.session_state['df_secteurs'] = df_sec
                 st.session_state['df_compteurs'] = df_comp
