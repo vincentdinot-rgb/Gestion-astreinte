@@ -8,7 +8,6 @@ MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS']
 JOURS_OFF_MATIN = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0], 'MS': [1]}
 JOURS_OFF_APREM = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0, 2, 4], 'MS': [1, 3]}
 
-# NOUVEAU PARAMÈTRE : planning_importe
 def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferences_dict, historique_dict, liste_feries, planning_importe=None):
     if planning_importe is None:
         planning_importe = {}
@@ -61,16 +60,14 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     for j in jours_we_feries:
         prob1 += pulp.lpSum(astr_1[m][j] for m in MEDECINS) == 1
 
-    # NOUVEAU : Application stricte du planning importé OU des congés
     for m in MEDECINS:
         for j in jours_we_feries:
             if j in planning_importe:
                 if planning_importe[j] == m:
-                    prob1 += astr_1[m][j] == 1 # Verrouille le médecin importé
+                    prob1 += astr_1[m][j] == 1 
                 else:
-                    prob1 += astr_1[m][j] == 0 # Interdit les autres
+                    prob1 += astr_1[m][j] == 0 
             else:
-                # Si non verrouillé par l'import, on applique la règle des congés
                 if categories[j] == 'WE_Start':
                     en_conge = (m, j) in absences_set or (m, j + datetime.timedelta(days=1)) in absences_set or (m, j + datetime.timedelta(days=2)) in absences_set
                     if en_conge:
@@ -79,12 +76,19 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
                     if (m, j) in absences_set:
                         prob1 += astr_1[m][j] == 0
 
+    # NOUVEAU : La règle Veille + Férié devient "souple". 
+    # Le fichier importé est le maître absolu.
+    ruptures_chainage = []
     for j in jours_we_feries:
         if categories[j] == 'Veille_Ferie':
             j_fer = j + datetime.timedelta(days=1)
             if j_fer in jours_we_feries:
                 for m in MEDECINS:
-                    prob1 += astr_1[m][j] == astr_1[m][j_fer]
+                    nom_var = f"Diff_{j.strftime('%Y%m%d')}_{m}"
+                    diff = pulp.LpVariable(nom_var, cat='Binary')
+                    prob1 += astr_1[m][j] - astr_1[m][j_fer] <= diff
+                    prob1 += astr_1[m][j_fer] - astr_1[m][j] <= diff
+                    ruptures_chainage.append(diff)
 
     depassements_we = []
     for m in MEDECINS:
@@ -105,11 +109,12 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
         prob1 += tot_fer <= max_fer
         prob1 += tot_fer >= min_fer
 
-    prob1 += 10*(max_we - min_we) + 10*(max_fer - min_fer) + 100 * pulp.lpSum(depassements_we)
+    # Ajout d'une pénalité très lourde (500) pour forcer le chaînage si possible, sans interdire sa séparation si le fichier l'exige.
+    prob1 += 10*(max_we - min_we) + 10*(max_fer - min_fer) + 100 * pulp.lpSum(depassements_we) + 500 * pulp.lpSum(ruptures_chainage)
     prob1.solve(solveur_rapide)
 
     if pulp.LpStatus[prob1.status] == 'Infeasible':
-        raise ValueError("❌ Conflit (Étape 1) : Le planning importé contient des aberrations ou entre en conflit direct avec des congés saisis. Vérifiez votre fichier.")
+        raise ValueError("❌ Conflit (Étape 1) : Impossible de répartir les Week-ends ou les Fériés. Vérifiez qu'il y a bien au moins un médecin de disponible sur chaque date.")
 
     planning_we_feries = {}
     for j in jours_we_feries:
@@ -126,7 +131,6 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     for j in jours_semaine:
         prob2 += pulp.lpSum(astr_2[m][j] for m in MEDECINS) == 1
 
-    # NOUVEAU : Application stricte du planning importé en semaine
     for m in MEDECINS:
         for j in jours_semaine:
             if j in planning_importe:
@@ -169,10 +173,10 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     prob2.solve(solveur_rapide)
 
     if pulp.LpStatus[prob2.status] == 'Infeasible':
-        raise ValueError("❌ Conflit (Étape 2) : Impossible de répartir la semaine. Le fichier importé force probablement une situation qui contredit vos règles (ex: VD forcé un mercredi).")
+        raise ValueError("❌ Conflit (Étape 2) : Impossible de répartir la semaine. Il y a probablement un jour où tous les médecins sont soit en repos fixe, soit en congés.")
 
     # ==========================================
-    # TEMPS 3 : FUSION ET SECTEURS (Inchangé)
+    # TEMPS 3 : FUSION ET SECTEURS
     # ==========================================
     planning_astreintes = planning_we_feries.copy()
     for j in jours_semaine:
@@ -197,13 +201,13 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
 
         if not is_working_day:
             if jour.weekday() >= 5: label = "Bloc WE"
-            else: label = f"Férié : {dict_noms_feries.get(jour, 'Férié')}"
+            else: label = f"{dict_noms_feries.get(jour, 'Férié')}"
                 
             donnees_secteurs.append({
                 "Date": jour.strftime('%d/%m/%Y'),
                 "Jour": jour.strftime('%A'),
                 "Demi-journée": "Journée Entière",
-                "Astreinte 📞": f"{medecin_garde} ({label})",
+                "Astreinte 📞": f"{medecin_garde} (Férié : {label})" if cat == 'Ferie' else f"{medecin_garde} ({label})",
                 "🟡 Secteur Jaune": "Repos / Fermé",
                 "🔵 Secteur Bleu": "Repos / Fermé",
                 "⚫ Secteur Gris": "Repos / Fermé"
