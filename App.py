@@ -91,35 +91,42 @@ fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
 
 if fichier_import is not None:
     try:
-        df_import = pd.read_csv(fichier_import)
-        if 'Date' in df_import.columns and 'Astreinte 📞' in df_import.columns:
+        # 1. Lecture ultra-robuste (Gère les fichiers Excel français, les points-virgules et les accents)
+        try:
+            df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='utf-8')
+        except Exception:
+            fichier_import.seek(0) # On rembobine le fichier si l'UTF-8 échoue
+            df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='latin-1')
+        
+        # 2. Recherche souple des colonnes (au cas où Excel aurait effacé l'émoji 📞)
+        col_date = next((col for col in df_import.columns if 'Date' in str(col)), None)
+        col_astr = next((col for col in df_import.columns if 'Astreinte' in str(col)), None)
+        
+        if col_date and col_astr:
             nb_jours_verrouilles = 0
             nb_feries_importes = 0
             
             for index, row in df_import.iterrows():
-                date_str = str(row['Date'])
-                astr_val = str(row['Astreinte 📞'])
+                date_str = str(row[col_date])
+                astr_val = str(row[col_astr])
                 
                 try:
                     date_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y').date()
                     
-                    # 1. Lecture et verrouillage des astreintes
+                    # Verrouillage des astreintes
                     for m in MEDECINS:
                         if m in astr_val:
                             st.session_state['planning_importe'][date_obj] = m
                             nb_jours_verrouilles += 1
                             break
                             
-                    # 2. Lecture automatique des jours fériés
+                    # Lecture automatique des jours fériés
                     nom_ferie = None
-                    # Méthode A : S'il y a une colonne "Férié" créée manuellement
                     if 'Férié' in df_import.columns and pd.notna(row['Férié']) and str(row['Férié']).strip() != "":
                         nom_ferie = str(row['Férié']).strip()
-                    # Méthode B : Si le nom du férié est déjà dans le texte de l'astreinte (export du logiciel)
                     elif "Férié :" in astr_val:
                         nom_ferie = astr_val.split("Férié :")[1].replace(")", "").strip()
                         
-                    # Si un férié est détecté, on l'ajoute au module s'il n'y est pas déjà
                     if nom_ferie:
                         if not any(f['date'] == date_obj for f in st.session_state['feries']):
                             st.session_state['feries'].append({"date": date_obj, "nom": nom_ferie})
@@ -130,9 +137,9 @@ if fichier_import is not None:
                     
             st.sidebar.success(f"✅ Fichier lu : {nb_jours_verrouilles} gardes et {nb_feries_importes} jours fériés importés.")
         else:
-            st.sidebar.error("Format non reconnu. Les colonnes 'Date' et 'Astreinte 📞' sont obligatoires.")
+            st.sidebar.error("Format non reconnu. Les colonnes 'Date' et 'Astreinte' sont introuvables.")
     except Exception as e:
-        st.sidebar.error("Erreur de lecture du fichier.")
+        st.sidebar.error(f"Erreur technique de lecture : {e}")
 
 if st.sidebar.button("🗑️ Tout réinitialiser"):
     st.session_state['absences'] = []
