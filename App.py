@@ -86,25 +86,28 @@ st.sidebar.markdown("---")
 
 # --- 5. Importation CSV ---
 st.sidebar.subheader("5. Verrouiller un planning existant")
-st.sidebar.caption("Uploadez un fichier CSV pour importer les gardes et les jours fériés.")
+st.sidebar.caption("Uploadez un fichier CSV pour importer les gardes, les fériés et les congés.")
 fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
 
 if fichier_import is not None:
     try:
-        # 1. Lecture ultra-robuste (Gère les fichiers Excel français, les points-virgules et les accents)
+        # Lecture robuste pour gérer l'encodage Excel français
         try:
             df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='utf-8')
         except Exception:
-            fichier_import.seek(0) # On rembobine le fichier si l'UTF-8 échoue
+            fichier_import.seek(0)
             df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='latin-1')
         
-        # 2. Recherche souple des colonnes (au cas où Excel aurait effacé l'émoji 📞)
         col_date = next((col for col in df_import.columns if 'Date' in str(col)), None)
         col_astr = next((col for col in df_import.columns if 'Astreinte' in str(col)), None)
+        
+        # Recherche souple d'une éventuelle colonne de congés
+        col_conges = next((col for col in df_import.columns if str(col).lower() in ['congé', 'conge', 'congés', 'conges', 'absence', 'absences', 'vacances']), None)
         
         if col_date and col_astr:
             nb_jours_verrouilles = 0
             nb_feries_importes = 0
+            nb_conges_importes = 0
             
             for index, row in df_import.iterrows():
                 date_str = str(row[col_date])
@@ -113,14 +116,14 @@ if fichier_import is not None:
                 try:
                     date_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y').date()
                     
-                    # Verrouillage des astreintes
+                    # 1. Verrouillage des astreintes
                     for m in MEDECINS:
                         if m in astr_val:
                             st.session_state['planning_importe'][date_obj] = m
                             nb_jours_verrouilles += 1
                             break
                             
-                    # Lecture automatique des jours fériés
+                    # 2. Lecture automatique des jours fériés
                     nom_ferie = None
                     if 'Férié' in df_import.columns and pd.notna(row['Férié']) and str(row['Férié']).strip() != "":
                         nom_ferie = str(row['Férié']).strip()
@@ -132,10 +135,21 @@ if fichier_import is not None:
                             st.session_state['feries'].append({"date": date_obj, "nom": nom_ferie})
                             nb_feries_importes += 1
                             
+                    # 3. NOUVEAU : Lecture automatique des congés/absences
+                    if col_conges and pd.notna(row[col_conges]):
+                        val_conges = str(row[col_conges]).upper()
+                        for m in MEDECINS:
+                            if m in val_conges:
+                                # On vérifie si ce congé n'est pas déjà enregistré
+                                absence_existe = any(a['medecin'] == m and a['date'] == date_obj for a in st.session_state['absences'])
+                                if not absence_existe:
+                                    st.session_state['absences'].append({"medecin": m, "date": date_obj})
+                                    nb_conges_importes += 1
+                                    
                 except ValueError:
-                    pass # Ignore les lignes vides ou avec un format de date invalide
+                    pass 
                     
-            st.sidebar.success(f"✅ Fichier lu : {nb_jours_verrouilles} gardes et {nb_feries_importes} jours fériés importés.")
+            st.sidebar.success(f"✅ Fichier lu : {nb_jours_verrouilles} gardes, {nb_feries_importes} jours fériés et {nb_conges_importes} jours de congés importés.")
         else:
             st.sidebar.error("Format non reconnu. Les colonnes 'Date' et 'Astreinte' sont introuvables.")
     except Exception as e:
