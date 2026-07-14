@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import datetime
+import io
 from moteur_repartition import generer_planning, MEDECINS
 
 st.set_page_config(page_title="Gestionnaire d'Astreintes - OHS", layout="wide")
@@ -91,7 +92,7 @@ fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
 
 if fichier_import is not None:
     try:
-        # Lecture robuste pour gérer l'encodage Excel français
+        # Lecture robuste pour gérer l'encodage Excel français et les points-virgules
         try:
             df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='utf-8')
         except Exception:
@@ -135,12 +136,12 @@ if fichier_import is not None:
                             st.session_state['feries'].append({"date": date_obj, "nom": nom_ferie})
                             nb_feries_importes += 1
                             
-                    # 3. NOUVEAU : Lecture automatique des congés/absences
+                    # 3. Lecture automatique des congés/absences
                     if col_conges and pd.notna(row[col_conges]):
                         val_conges = str(row[col_conges]).upper()
                         for m in MEDECINS:
                             if m in val_conges:
-                                # On vérifie si ce congé n'est pas déjà enregistré
+                                # Vérifie si ce congé n'est pas déjà enregistré
                                 absence_existe = any(a['medecin'] == m and a['date'] == date_obj for a in st.session_state['absences'])
                                 if not absence_existe:
                                     st.session_state['absences'].append({"medecin": m, "date": date_obj})
@@ -229,9 +230,37 @@ with col2:
                     styles[i] = 'color: #ced4da; font-style: italic;'
             return styles
 
-        st.dataframe(df_visuel.style.apply(appliquer_couleurs, axis=1), hide_index=True, height=650, use_container_width=True)
+        df_style = df_visuel.style.apply(appliquer_couleurs, axis=1)
+        st.dataframe(df_style, hide_index=True, height=650, use_container_width=True)
         
-        csv = st.session_state['df_secteurs'].to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Télécharger le planning (Excel/CSV)", data=csv, file_name="Planning_Secteurs_OHS.csv", mime="text/csv")
+        st.markdown("---")
+        st.write("📥 **Options de téléchargement :**")
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            # 1. Export CSV (Base de données pure pour réimportation, adaptée au Excel français)
+            csv = st.session_state['df_secteurs'].to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button(
+                label="⚙️ Télécharger le CSV (Pour l'outil d'importation)", 
+                data=csv, 
+                file_name="Planning_Secteurs_OHS.csv", 
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+        with col_btn2:
+            # 2. Export Excel (Mise en page conservée pour l'humain)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_style.to_excel(writer, index=False, sheet_name='Planning')
+            
+            st.download_button(
+                label="🎨 Télécharger l'Excel (Avec les couleurs)",
+                data=buffer.getvalue(),
+                file_name="Planning_Secteurs_OHS.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
     else:
         st.info("👈 Configurez vos paramètres à gauche et cliquez sur 'Générer le planning'.")
