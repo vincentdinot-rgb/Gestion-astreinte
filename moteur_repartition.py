@@ -2,19 +2,25 @@ import pulp
 import calendar
 import datetime
 import pandas as pd
+import locale
 
-MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS']
+# Force l'affichage des jours en français
+try:
+    locale.setlocale(locale.LC_TIME, 'fr_FR.utf8')
+except:
+    pass # Si le serveur ne l'a pas, on garde la configuration par défaut
 
-JOURS_OFF_MATIN = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0], 'MS': [1]}
-JOURS_OFF_APREM = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0, 2, 4], 'MS': [1, 3]}
+# 1. AJOUT DE "GC" DANS L'ÉQUIPE
+MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS', 'GC']
+
+# 2. TEMPS PLEIN POUR "GC" (Crochets vides)
+JOURS_OFF_MATIN = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0], 'MS': [1], 'GC': []}
+JOURS_OFF_APREM = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0, 2, 4], 'MS': [1, 3], 'GC': []}
 
 def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferences_dict, historique_dict, liste_feries, planning_importe=None):
     if planning_importe is None:
         planning_importe = {}
 
-    # ==========================================
-    # 0. INITIALISATION ET CATÉGORISATION
-    # ==========================================
     jours_base = []
     annee_enc, mois_enc = annee_debut, mois_debut
     for _ in range(nb_mois):
@@ -51,9 +57,6 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
 
     solveur_rapide = pulp.PULP_CBC_CMD(msg=False, timeLimit=15)
 
-    # ==========================================
-    # TEMPS 1 : RÉPARTITION DES WEEK-ENDS ET FÉRIÉS
-    # ==========================================
     prob1 = pulp.LpProblem("Step1_WE_Feries", pulp.LpMinimize)
     astr_1 = pulp.LpVariable.dicts("G1", (MEDECINS, jours_we_feries), cat='Binary')
 
@@ -63,29 +66,22 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     for m in MEDECINS:
         for j in jours_we_feries:
             if j in planning_importe:
-                if planning_importe[j] == m:
-                    prob1 += astr_1[m][j] == 1 
-                else:
-                    prob1 += astr_1[m][j] == 0 
+                if planning_importe[j] == m: prob1 += astr_1[m][j] == 1 
+                else: prob1 += astr_1[m][j] == 0 
             else:
                 if categories[j] == 'WE_Start':
                     en_conge = (m, j) in absences_set or (m, j + datetime.timedelta(days=1)) in absences_set or (m, j + datetime.timedelta(days=2)) in absences_set
-                    if en_conge:
-                        prob1 += astr_1[m][j] == 0
+                    if en_conge: prob1 += astr_1[m][j] == 0
                 else:
-                    if (m, j) in absences_set:
-                        prob1 += astr_1[m][j] == 0
+                    if (m, j) in absences_set: prob1 += astr_1[m][j] == 0
 
-    # NOUVEAU : La règle Veille + Férié devient "souple". 
-    # Le fichier importé est le maître absolu.
     ruptures_chainage = []
     for j in jours_we_feries:
         if categories[j] == 'Veille_Ferie':
             j_fer = j + datetime.timedelta(days=1)
             if j_fer in jours_we_feries:
                 for m in MEDECINS:
-                    nom_var = f"Diff_{j.strftime('%Y%m%d')}_{m}"
-                    diff = pulp.LpVariable(nom_var, cat='Binary')
+                    diff = pulp.LpVariable(f"Diff_{j.strftime('%Y%m%d')}_{m}", cat='Binary')
                     prob1 += astr_1[m][j] - astr_1[m][j_fer] <= diff
                     prob1 += astr_1[m][j_fer] - astr_1[m][j] <= diff
                     ruptures_chainage.append(diff)
@@ -104,17 +100,15 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
         tot_we = historique_dict[m].get('weekend', 0) + pulp.lpSum(astr_1[m][j] for j in jours_we_feries if categories[j] == 'WE_Start')
         prob1 += tot_we <= max_we
         prob1 += tot_we >= min_we
-
         tot_fer = historique_dict[m].get('ferie', 0) + pulp.lpSum(astr_1[m][j] for j in jours_we_feries if categories[j] == 'Ferie')
         prob1 += tot_fer <= max_fer
         prob1 += tot_fer >= min_fer
 
-    # Ajout d'une pénalité très lourde (500) pour forcer le chaînage si possible, sans interdire sa séparation si le fichier l'exige.
     prob1 += 10*(max_we - min_we) + 10*(max_fer - min_fer) + 100 * pulp.lpSum(depassements_we) + 500 * pulp.lpSum(ruptures_chainage)
     prob1.solve(solveur_rapide)
 
     if pulp.LpStatus[prob1.status] == 'Infeasible':
-        raise ValueError("❌ Conflit (Étape 1) : Impossible de répartir les Week-ends ou les Fériés. Vérifiez qu'il y a bien au moins un médecin de disponible sur chaque date.")
+        raise ValueError("❌ Conflit (Étape 1) : Impossible de répartir les Week-ends ou les Fériés.")
 
     planning_we_feries = {}
     for j in jours_we_feries:
@@ -122,9 +116,6 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
             if pulp.value(astr_1[m][j]) is not None and round(pulp.value(astr_1[m][j])) == 1:
                 planning_we_feries[j] = m
 
-    # ==========================================
-    # TEMPS 2 : RÉPARTITION DES SEMAINES
-    # ==========================================
     prob2 = pulp.LpProblem("Step2_Semaines", pulp.LpMinimize)
     astr_2 = pulp.LpVariable.dicts("G2", (MEDECINS, jours_semaine), cat='Binary')
 
@@ -134,13 +125,10 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     for m in MEDECINS:
         for j in jours_semaine:
             if j in planning_importe:
-                if planning_importe[j] == m:
-                    prob2 += astr_2[m][j] == 1
-                else:
-                    prob2 += astr_2[m][j] == 0
+                if planning_importe[j] == m: prob2 += astr_2[m][j] == 1
+                else: prob2 += astr_2[m][j] == 0
             else:
-                if (m, j) in absences_set:
-                    prob2 += astr_2[m][j] == 0
+                if (m, j) in absences_set: prob2 += astr_2[m][j] == 0
                 elif j.weekday() in JOURS_OFF_MATIN[m] or j.weekday() in JOURS_OFF_APREM[m]:
                     prob2 += astr_2[m][j] == 0
 
@@ -154,7 +142,6 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     for cle, jours_de_la_semaine in semaines_iso.items():
         lundi = jours_de_la_semaine[0] - datetime.timedelta(days=jours_de_la_semaine[0].weekday())
         vendredi = lundi + datetime.timedelta(days=4)
-        
         for m in MEDECINS:
             a_le_we = 1 if planning_we_feries.get(vendredi) == m else 0
             dep_hebdo = pulp.LpVariable(f"DepHebdo_{m}_{cle[0]}_{cle[1]}", lowBound=0, cat='Integer')
@@ -173,11 +160,8 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     prob2.solve(solveur_rapide)
 
     if pulp.LpStatus[prob2.status] == 'Infeasible':
-        raise ValueError("❌ Conflit (Étape 2) : Impossible de répartir la semaine. Il y a probablement un jour où tous les médecins sont soit en repos fixe, soit en congés.")
+        raise ValueError("❌ Conflit (Étape 2) : Impossible de répartir la semaine.")
 
-    # ==========================================
-    # TEMPS 3 : FUSION ET SECTEURS
-    # ==========================================
     planning_astreintes = planning_we_feries.copy()
     for j in jours_semaine:
         for m in MEDECINS:
@@ -193,11 +177,16 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
     donnees_secteurs = []
     jours_a_afficher = [j for j in jours_base if (annee_debut <= j.year and mois_debut <= j.month) or j.year > annee_debut][:sum(calendar.monthrange(annee_debut + (mois_debut + i - 1)//12, (mois_debut + i - 1)%12 + 1)[1] for i in range(nb_mois))]
     dict_noms_feries = {f['date']: f['nom'] for f in liste_feries}
+    
+    jours_francais = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 
     for jour in jours_a_afficher:
         cat = categories[jour]
         medecin_garde = planning_astreintes.get(jour, "Aucun")
         is_working_day = (jour.weekday() < 5) and (cat != 'Ferie')
+        
+        # 3. JOURS EN FRANÇAIS
+        nom_jour_fr = jours_francais[jour.weekday()]
 
         if not is_working_day:
             if jour.weekday() >= 5: label = "Bloc WE"
@@ -205,7 +194,7 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
                 
             donnees_secteurs.append({
                 "Date": jour.strftime('%d/%m/%Y'),
-                "Jour": jour.strftime('%A'),
+                "Jour": nom_jour_fr,
                 "Demi-journée": "Journée Entière",
                 "Astreinte 📞": f"{medecin_garde} (Férié : {label})" if cat == 'Ferie' else f"{medecin_garde} ({label})",
                 "🟡 Secteur Jaune": "Repos / Fermé",
@@ -234,9 +223,10 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
             if "VD" in presents: sec_bleu = "VD"
             elif "PM" in presents: sec_bleu = "PM"
             else: sec_bleu = "VIDE"
-                
-            gris_actifs = [m for m in ["CJ", "MS"] if m in presents]
-            if len(gris_actifs) == 2: sec_gris = "CJ & MS"
+            
+            # 4. AFFECTATION DE "GC" AU SECTEUR GRIS
+            gris_actifs = [m for m in ["CJ", "MS", "GC"] if m in presents]
+            if len(gris_actifs) >= 2: sec_gris = " & ".join(gris_actifs) # Gère s'ils sont 2 ou 3
             elif len(gris_actifs) == 1: sec_gris = gris_actifs[0]
             else: sec_gris = "VIDE"
 
@@ -246,7 +236,7 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
 
             donnees_secteurs.append({
                 "Date": jour.strftime('%d/%m/%Y'),
-                "Jour": jour.strftime('%A'),
+                "Jour": nom_jour_fr,
                 "Demi-journée": demi_journee,
                 "Astreinte 📞": label_astreinte,
                 "🟡 Secteur Jaune": sec_jaune,
