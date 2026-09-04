@@ -7,9 +7,9 @@ from moteur_repartition import generer_planning, MEDECINS
 st.set_page_config(page_title="Gestionnaire d'Astreintes - OHS", layout="wide")
 st.title("🏥 Pilotage du Centre Florentin : Astreintes & Secteurs")
 
-# Initialisation des variables de session
+# Initialisation des variables avec GC inclus (6 médecins)
 if 'absences' not in st.session_state: st.session_state['absences'] = []
-if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': []}
+if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GC': []}
 if 'feries' not in st.session_state: st.session_state['feries'] = []
 if 'df_secteurs' not in st.session_state: st.session_state['df_secteurs'] = pd.DataFrame()
 if 'df_compteurs' not in st.session_state: st.session_state['df_compteurs'] = pd.DataFrame()
@@ -67,9 +67,9 @@ st.sidebar.caption("Saisissez les compteurs du passé :")
 if 'df_historique' not in st.session_state:
     st.session_state['df_historique'] = pd.DataFrame({
         "Médecin": MEDECINS,
-        "Semaines": [0, 0, 0, 0, 0],
-        "Week-ends": [0, 0, 0, 0, 0],
-        "Fériés": [0, 0, 0, 0, 0]
+        "Semaines": [0] * len(MEDECINS), # Génère 6 zéros automatiquement
+        "Week-ends": [0] * len(MEDECINS),
+        "Fériés": [0] * len(MEDECINS)
     })
 
 df_hist_edit = st.sidebar.data_editor(st.session_state['df_historique'], hide_index=True)
@@ -92,7 +92,6 @@ fichier_import = st.sidebar.file_uploader("Fichier CSV", type=['csv'])
 
 if fichier_import is not None:
     try:
-        # Lecture robuste pour gérer l'encodage Excel français et les points-virgules
         try:
             df_import = pd.read_csv(fichier_import, sep=None, engine='python', encoding='utf-8')
         except Exception:
@@ -101,8 +100,6 @@ if fichier_import is not None:
         
         col_date = next((col for col in df_import.columns if 'Date' in str(col)), None)
         col_astr = next((col for col in df_import.columns if 'Astreinte' in str(col)), None)
-        
-        # Recherche souple d'une éventuelle colonne de congés
         col_conges = next((col for col in df_import.columns if str(col).lower() in ['congé', 'conge', 'congés', 'conges', 'absence', 'absences', 'vacances']), None)
         
         if col_date and col_astr:
@@ -117,14 +114,12 @@ if fichier_import is not None:
                 try:
                     date_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y').date()
                     
-                    # 1. Verrouillage des astreintes
                     for m in MEDECINS:
                         if m in astr_val:
                             st.session_state['planning_importe'][date_obj] = m
                             nb_jours_verrouilles += 1
                             break
                             
-                    # 2. Lecture automatique des jours fériés
                     nom_ferie = None
                     if 'Férié' in df_import.columns and pd.notna(row['Férié']) and str(row['Férié']).strip() != "":
                         nom_ferie = str(row['Férié']).strip()
@@ -136,12 +131,10 @@ if fichier_import is not None:
                             st.session_state['feries'].append({"date": date_obj, "nom": nom_ferie})
                             nb_feries_importes += 1
                             
-                    # 3. Lecture automatique des congés/absences
                     if col_conges and pd.notna(row[col_conges]):
                         val_conges = str(row[col_conges]).upper()
                         for m in MEDECINS:
                             if m in val_conges:
-                                # Vérifie si ce congé n'est pas déjà enregistré
                                 absence_existe = any(a['medecin'] == m and a['date'] == date_obj for a in st.session_state['absences'])
                                 if not absence_existe:
                                     st.session_state['absences'].append({"medecin": m, "date": date_obj})
@@ -158,7 +151,7 @@ if fichier_import is not None:
 
 if st.sidebar.button("🗑️ Tout réinitialiser"):
     st.session_state['absences'] = []
-    st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': []}
+    st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GC': []} # Inclus GC
     st.session_state['feries'] = []
     st.session_state['planning_importe'] = {}
     st.rerun()
@@ -238,7 +231,6 @@ with col2:
         col_btn1, col_btn2 = st.columns(2)
         
         with col_btn1:
-            # 1. Export CSV (Base de données pure pour réimportation, adaptée au Excel français)
             csv = st.session_state['df_secteurs'].to_csv(index=False, sep=';').encode('utf-8-sig')
             st.download_button(
                 label="⚙️ Télécharger le CSV (Pour l'outil d'importation)", 
@@ -249,7 +241,6 @@ with col2:
             )
             
         with col_btn2:
-            # 2. Export Excel (Mise en page conservée pour l'humain)
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_style.to_excel(writer, index=False, sheet_name='Planning')
