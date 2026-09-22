@@ -67,7 +67,7 @@ st.sidebar.caption("Saisissez les compteurs du passé :")
 if 'df_historique' not in st.session_state:
     st.session_state['df_historique'] = pd.DataFrame({
         "Médecin": MEDECINS,
-        "Semaines": [0] * len(MEDECINS), # Génère 6 zéros automatiquement
+        "Semaines": [0] * len(MEDECINS),
         "Week-ends": [0] * len(MEDECINS),
         "Fériés": [0] * len(MEDECINS)
     })
