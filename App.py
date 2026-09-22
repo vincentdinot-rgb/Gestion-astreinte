@@ -7,9 +7,9 @@ from moteur_repartition import generer_planning, MEDECINS
 st.set_page_config(page_title="Gestionnaire d'Astreintes - OHS", layout="wide")
 st.title("🏥 Pilotage du Centre Florentin : Astreintes & Secteurs")
 
-# Initialisation des variables avec GC inclus (6 médecins)
+# Initialisation des variables avec GK inclus (6 médecins)
 if 'absences' not in st.session_state: st.session_state['absences'] = []
-if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GC': []}
+if 'preferences' not in st.session_state: st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GK': []}
 if 'feries' not in st.session_state: st.session_state['feries'] = []
 if 'df_secteurs' not in st.session_state: st.session_state['df_secteurs'] = pd.DataFrame()
 if 'df_compteurs' not in st.session_state: st.session_state['df_compteurs'] = pd.DataFrame()
@@ -151,7 +151,7 @@ if fichier_import is not None:
 
 if st.sidebar.button("🗑️ Tout réinitialiser"):
     st.session_state['absences'] = []
-    st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GC': []} # Inclus GC
+    st.session_state['preferences'] = {'OA': [], 'PM': [], 'VD': [3], 'CJ': [], 'MS': [], 'GK': []} # Inclus GK
     st.session_state['feries'] = []
     st.session_state['planning_importe'] = {}
     st.rerun()
