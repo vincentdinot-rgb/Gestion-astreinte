@@ -10,12 +10,12 @@ try:
 except:
     pass # Si le serveur ne l'a pas, on garde la configuration par défaut
 
-# 1. AJOUT DE "GC" DANS L'ÉQUIPE
-MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS', 'GC']
+# 1. AJOUT DE "GK" DANS L'ÉQUIPE
+MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS', 'GK']
 
-# 2. TEMPS PLEIN POUR "GC" (Crochets vides)
-JOURS_OFF_MATIN = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0], 'MS': [1], 'GC': []}
-JOURS_OFF_APREM = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0, 2, 4], 'MS': [1, 3], 'GC': []}
+# 2. TEMPS PLEIN POUR "GK" (Crochets vides)
+JOURS_OFF_MATIN = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0], 'MS': [1], 'GK': []}
+JOURS_OFF_APREM = {'OA': [], 'PM': [], 'VD': [2], 'CJ': [0, 2, 4], 'MS': [1, 3], 'GK': []}
 
 def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferences_dict, historique_dict, liste_feries, planning_importe=None):
     if planning_importe is None:
@@ -224,8 +224,8 @@ def generer_planning(annee_debut, mois_debut, nb_mois, liste_absences, preferenc
             elif "PM" in presents: sec_bleu = "PM"
             else: sec_bleu = "VIDE"
             
-            # 4. AFFECTATION DE "GC" AU SECTEUR GRIS
-            gris_actifs = [m for m in ["CJ", "MS", "GC"] if m in presents]
+            # 4. AFFECTATION DE "GK" AU SECTEUR GRIS
+            gris_actifs = [m for m in ["CJ", "MS", "GK"] if m in presents]
             if len(gris_actifs) >= 2: sec_gris = " & ".join(gris_actifs) # Gère s'ils sont 2 ou 3
             elif len(gris_actifs) == 1: sec_gris = gris_actifs[0]
             else: sec_gris = "VIDE"
