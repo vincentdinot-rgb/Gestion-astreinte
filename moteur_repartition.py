@@ -10,7 +10,7 @@ try:
 except:
     pass # Si le serveur ne l'a pas, on garde la configuration par défaut
 
-# 1. AJOUT DE "GK" DANS L'ÉQUIPE
+# 1. L'ÉQUIPE (GC remplacé par GK)
 MEDECINS = ['OA', 'PM', 'VD', 'CJ', 'MS', 'GK']
 
 # 2. TEMPS PLEIN POUR "GK" (Crochets vides)
